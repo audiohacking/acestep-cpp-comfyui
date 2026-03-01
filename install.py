@@ -70,6 +70,26 @@ def _run(cmd, cwd):
         )
 
 
+def _binary_exists(build_dir, name):
+    """Return True if *name* exists in build_dir or build_dir/bin.
+
+    ggml's CMakeLists.txt sets CMAKE_RUNTIME_OUTPUT_DIRECTORY to
+    ``${CMAKE_BINARY_DIR}/bin`` when it is used as a subdirectory (i.e. the
+    normal case here), which causes the built executables to land in
+    ``build/bin/`` rather than ``build/``.  We therefore check both locations
+    so that binaries produced by either the new cmake configure command (which
+    now passes CMAKE_RUNTIME_OUTPUT_DIRECTORY explicitly) or by an older /
+    manual build are found correctly.
+    """
+    for candidate in (
+        os.path.join(build_dir, name),
+        os.path.join(build_dir, "bin", name),
+    ):
+        if os.path.isfile(candidate):
+            return True
+    return False
+
+
 # ---------------------------------------------------------------------------
 # Main installation routine
 # ---------------------------------------------------------------------------
@@ -87,9 +107,11 @@ def install() -> None:
             )
             return
 
-    # Skip rebuild if both binaries already exist
+    # Skip rebuild if both binaries already exist.
+    # ggml's CMakeLists.txt (when used as a subdirectory) redirects executables
+    # to build/bin/ via CMAKE_RUNTIME_OUTPUT_DIRECTORY, so check both locations.
     build_dir = os.path.join(REPO_DIR, "build")
-    if all(shutil.which(b, path=build_dir) for b in BINARIES):
+    if all(_binary_exists(build_dir, b) for b in BINARIES):
         print(
             f"[acestep-cpp] Binaries already present in {build_dir} — skipping build.",
             flush=True,
@@ -116,7 +138,14 @@ def install() -> None:
 
     os.makedirs(build_dir, exist_ok=True)
     print("[acestep-cpp] Running CMake configure …", flush=True)
-    _run(["cmake", ".."] + _cmake_flags(backend), cwd=build_dir)
+    # Pass CMAKE_RUNTIME_OUTPUT_DIRECTORY explicitly so ggml's CMakeLists.txt
+    # (which defaults to ${CMAKE_BINARY_DIR}/bin when used as a subdirectory)
+    # does not redirect the ace-qwen3 and dit-vae executables into build/bin/.
+    _run(
+        ["cmake", "..", f"-DCMAKE_RUNTIME_OUTPUT_DIRECTORY={build_dir}"]
+        + _cmake_flags(backend),
+        cwd=build_dir,
+    )
 
     # Build
     jobs = str(multiprocessing.cpu_count())
@@ -127,7 +156,7 @@ def install() -> None:
     )
 
     # Verify
-    missing = [b for b in BINARIES if not shutil.which(b, path=build_dir)]
+    missing = [b for b in BINARIES if not _binary_exists(build_dir, b)]
     if missing:
         raise RuntimeError(
             f"Build finished but expected binaries not found: {', '.join(missing)}"

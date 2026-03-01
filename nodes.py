@@ -82,6 +82,24 @@ def _coerce_float(value: Any, default: float) -> float:
     if isinstance(value, str):
         return float(value) if value.strip() else default
     return float(value)
+def _binary_in_build(build_dir: str, name: str) -> Optional[str]:
+    """Return the path to *name* if it exists in *build_dir* or *build_dir*/bin.
+
+    ggml's CMakeLists.txt sets ``CMAKE_RUNTIME_OUTPUT_DIRECTORY`` to
+    ``${CMAKE_BINARY_DIR}/bin`` when it is used as a cmake subdirectory (the
+    normal case for acestep.cpp).  The cmake configure command now passes this
+    variable explicitly, but we still check *build_dir*/bin/ so that existing
+    installations built before this fix are found without a forced rebuild.
+    """
+    for candidate in (
+        os.path.join(build_dir, name),
+        os.path.join(build_dir, "bin", name),
+    ):
+        if os.path.isfile(candidate):
+            return candidate
+    return None
+
+
 def get_binary_path(binary_name: str) -> Optional[str]:
     """
     Locate an acestep.cpp binary.
@@ -90,6 +108,8 @@ def get_binary_path(binary_name: str) -> Optional[str]:
       1. Explicit path from config.json ``binary_paths`` mapping.
       2. System PATH (via shutil.which).
       3. ``<node_dir>/acestep.cpp/build/<binary_name>`` (local build alongside the node).
+      4. ``<node_dir>/acestep.cpp/build/bin/<binary_name>`` (ggml's default output
+         directory when used as a cmake subdirectory).
     """
     config = load_config()
     explicit = config.get("binary_paths", {}).get(binary_name)
@@ -100,11 +120,8 @@ def get_binary_path(binary_name: str) -> Optional[str]:
     if on_path:
         return on_path
 
-    local = os.path.join(os.path.dirname(__file__), "acestep.cpp", "build", binary_name)
-    if os.path.isfile(local):
-        return local
-
-    return None
+    build_base = os.path.join(os.path.dirname(__file__), "acestep.cpp", "build")
+    return _binary_in_build(build_base, binary_name)
 
 
 # ---------------------------------------------------------------------------
@@ -438,7 +455,14 @@ class AcestepCPPBuilder:
         os.makedirs(build_dir, exist_ok=True)
 
         # --- CMake configure --------------------------------------------------
-        cmake_cmd = ["cmake", ".."] + self._cmake_flags(resolved)
+        # Pass CMAKE_RUNTIME_OUTPUT_DIRECTORY explicitly so that ggml's
+        # CMakeLists.txt (which defaults to ${CMAKE_BINARY_DIR}/bin when used
+        # as a subdirectory) does not redirect ace-qwen3 and dit-vae into
+        # build/bin/ instead of build/.
+        cmake_cmd = [
+            "cmake", "..",
+            f"-DCMAKE_RUNTIME_OUTPUT_DIRECTORY={build_dir}",
+        ] + self._cmake_flags(resolved)
         log.append(f"[AcestepCPP] Configuring: {' '.join(cmake_cmd)}")
         if not shutil.which("cmake"):
             raise RuntimeError(
@@ -454,11 +478,13 @@ class AcestepCPPBuilder:
         self._run(build_cmd, cwd=build_dir, log_lines=log)
 
         # --- Verify outputs ---------------------------------------------------
-        missing = []
-        for binary in self._BINARIES:
-            path = os.path.join(build_dir, binary)
-            if not os.path.isfile(path):
-                missing.append(binary)
+        # _binary_in_build checks both build/ (new cmake configure with explicit
+        # output dir) and build/bin/ (ggml's default when
+        # CMAKE_RUNTIME_OUTPUT_DIRECTORY is not set).
+        missing = [
+            binary for binary in self._BINARIES
+            if _binary_in_build(build_dir, binary) is None
+        ]
 
         if missing:
             raise RuntimeError(
