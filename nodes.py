@@ -38,7 +38,20 @@ def get_merged_model_folders() -> List[str]:
 
 
 def scan_gguf_models() -> List[str]:
-    """Scan all model folders for .gguf files, deduplicated and sorted."""
+    """Scan registered 'acestep_gguf' folder type for .gguf files.
+
+    Tries ComfyUI's folder_paths registry first (so the built-in model
+    manager can track the files), then falls back to manual scanning.
+    """
+    try:
+        all_files = folder_paths.get_filename_list("acestep_gguf")
+        gguf_files = sorted(f for f in all_files if f.lower().endswith(".gguf"))
+        if gguf_files:
+            return gguf_files
+    except Exception:
+        pass
+
+    # Fallback: manual scan of text_encoders + user-configured folders
     seen_models: set = set()
     models: List[str] = []
     for folder in get_merged_model_folders():
@@ -61,8 +74,15 @@ def find_model_path(model_name: str) -> Optional[str]:
     return None
 
 
+def _coerce_float(value: Any, default: float) -> float:
+    """Return *value* as a float, falling back to *default* for empty strings.
 
-
+    Older ComfyUI workflows may store optional FLOAT widget values as ``""``
+    instead of the numeric default when the field was not explicitly set.
+    """
+    if isinstance(value, str):
+        return float(value) if value.strip() else default
+    return float(value)
 def get_binary_path(binary_name: str) -> Optional[str]:
     """
     Locate an acestep.cpp binary.
@@ -871,6 +891,11 @@ class AcestepCPPGenerate:
         lora: Optional[Dict[str, Any]] = None,
     ):
         import torchaudio
+
+        # Coerce optional FLOAT inputs that may arrive as empty strings from
+        # workflows saved with an older version of the node schema.
+        lm_top_p = _coerce_float(lm_top_p, 0.9)
+        audio_cover_strength = _coerce_float(audio_cover_strength, 1.0)
 
         ace_qwen3 = get_binary_path("ace-qwen3")
         dit_vae = get_binary_path("dit-vae")

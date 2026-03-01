@@ -1,0 +1,124 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  # -------------------------------------------------------------------------
+  # Fast validation: Python syntax + linting + pytest + JSON well-formedness
+  # -------------------------------------------------------------------------
+  validate:
+    name: Validate code and workflow JSONs
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install test dependencies
+        run: pip install pytest pyflakes
+
+      - name: Check Python syntax
+        run: python -m py_compile nodes.py __init__.py install.py
+
+      - name: Lint Python
+        run: python -m pyflakes nodes.py __init__.py install.py
+
+      - name: Run unit tests
+        run: python -m pytest tests/ -v
+
+      - name: Validate workflow JSON files
+        run: |
+          for f in workflow-examples/*.json; do
+            python -m json.tool "$f" > /dev/null \
+              && echo "✓ $f" \
+              || (echo "✗ $f" && exit 1)
+          done
+
+  # -------------------------------------------------------------------------
+  # Build test: clone acestep.cpp and compile the C++ binaries via install.py
+  # Tests the automatic build that ComfyUI Manager triggers on node install.
+  # -------------------------------------------------------------------------
+  build-test:
+    name: Build acestep.cpp binaries (install.py)
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch'
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build tools
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y cmake build-essential
+
+      - name: Run install.py (clone + cmake build)
+        run: python install.py
+
+      - name: Verify binaries exist
+        run: |
+          for bin in ace-qwen3 dit-vae; do
+            test -f "acestep.cpp/build/$bin" \
+              && echo "✓ $bin" \
+              || (echo "✗ $bin not found" && exit 1)
+          done
+
+  # -------------------------------------------------------------------------
+  # Full workflow test via Comfy-Org/comfy-action
+  # Runs on workflow_dispatch only because it must download large GGUF models.
+  # -------------------------------------------------------------------------
+  comfy-workflow-test:
+    name: Run workflow with Comfy Action
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch'
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      # Install our custom node into a temporary ComfyUI custom_nodes directory
+      # so comfy-action can find it when it sets up ComfyUI.
+      - name: Prepare custom node for comfy-action
+        run: |
+          mkdir -p ${{ github.workspace }}/custom_nodes
+          ln -s ${{ github.workspace }} \
+            ${{ github.workspace }}/custom_nodes/acestep-cpp-comfyui
+
+      - name: Copy workflow to workflows/ directory
+        run: |
+          mkdir -p ${{ github.workspace }}/workflows
+          cp workflow-examples/acestep-cpp-text2music.json \
+             ${{ github.workspace }}/workflows/text2music.json
+
+      - uses: Comfy-Org/comfy-action@main
+        with:
+          os: linux
+          workflow_filenames: "text2music.json"
+          models-json: >-
+            {
+              "acestep-5Hz-lm-4B-Q8_0.gguf": {
+                "url": "https://huggingface.co/Serveurperso/ACE-Step-1.5-GGUF/resolve/main/acestep-5Hz-lm-4B-Q8_0.gguf",
+                "directory": "text_encoders"
+              },
+              "Qwen3-Embedding-0.6B-Q8_0.gguf": {
+                "url": "https://huggingface.co/Serveurperso/ACE-Step-1.5-GGUF/resolve/main/Qwen3-Embedding-0.6B-Q8_0.gguf",
+                "directory": "text_encoders"
+              },
+              "acestep-v15-turbo-Q8_0.gguf": {
+                "url": "https://huggingface.co/Serveurperso/ACE-Step-1.5-GGUF/resolve/main/acestep-v15-turbo-Q8_0.gguf",
+                "directory": "text_encoders"
+              },
+              "vae-BF16.gguf": {
+                "url": "https://huggingface.co/Serveurperso/ACE-Step-1.5-GGUF/resolve/main/vae-BF16.gguf",
+                "directory": "text_encoders"
+              }
+            }
+
