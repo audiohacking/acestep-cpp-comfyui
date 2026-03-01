@@ -7,7 +7,6 @@ import subprocess
 import tempfile
 from typing import Any, Dict, List, Optional
 
-import torch
 import folder_paths
 
 CONFIG_FILE = os.path.join(os.path.dirname(__file__), "config.json")
@@ -390,7 +389,7 @@ class AcestepCPPBuilder:
         if result.returncode != 0:
             raise RuntimeError(
                 f"Command failed (exit {result.returncode}): {label}\n"
-                + "\n".join(log_lines[-self._MAX_ERROR_LOG_LINES:])
+                + "\n".join(log_lines[-AcestepCPPBuilder._MAX_ERROR_LOG_LINES:])
             )
 
     # ------------------------------------------------------------------
