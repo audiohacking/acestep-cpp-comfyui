@@ -1,5 +1,3 @@
-import os
-
 try:
     import folder_paths as _fp
 
