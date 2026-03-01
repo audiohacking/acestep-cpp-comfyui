@@ -88,6 +88,154 @@ def get_binary_path(binary_name: str) -> Optional[str]:
 # Nodes
 # ---------------------------------------------------------------------------
 
+# HuggingFace repo that hosts all pre-quantized ACE-Step GGUFs
+_HF_REPO = "Serveurperso/ACE-Step-1.5-GGUF"
+
+# Quant resolution rules mirroring models.sh
+_EMB_QUANTS = ["Q8_0", "BF16"]
+_LM_SMALL_QUANTS = ["Q8_0", "BF16"]
+_LM_4B_QUANTS = ["Q8_0", "Q6_K", "Q5_K_M", "BF16"]
+_DIT_QUANTS = ["Q8_0", "Q6_K", "Q5_K_M", "Q4_K_M", "BF16"]
+_DIT_VARIANTS = ["turbo", "sft", "base", "turbo-shift1", "turbo-shift3", "turbo-continuous"]
+_LM_SIZES = ["4B", "1.7B", "0.6B"]
+
+
+def _resolve_quant(requested: str, model_type: str) -> str:
+    """Mirror the quant resolution logic from models.sh."""
+    if model_type in ("emb", "lm_small"):
+        return requested if requested == "BF16" else "Q8_0"
+    if model_type == "lm_4B":
+        if requested in ("Q4_K_M", "Q5_K_M"):
+            return "Q5_K_M"
+        return requested if requested in ("BF16", "Q8_0", "Q6_K") else "Q8_0"
+    return requested  # dit: all quants available
+
+
+class AcestepCPPModelDownloader:
+    """
+    Download ACE-Step GGUF models from HuggingFace (``Serveurperso/ACE-Step-1.5-GGUF``)
+    directly into a local folder so they appear in the Model Loader dropdown.
+    """
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        try:
+            default_dir = folder_paths.get_folder_paths("text_encoders")[0]
+        except Exception:
+            default_dir = os.path.join(os.path.dirname(__file__), "models")
+
+        return {
+            "required": {
+                "save_dir": (
+                    "STRING",
+                    {
+                        "default": default_dir,
+                        "tooltip": "Directory to save downloaded GGUF files into",
+                    },
+                ),
+                "lm_size": (
+                    _LM_SIZES,
+                    {"default": "4B", "tooltip": "LM model size"},
+                ),
+                "quant": (
+                    _DIT_QUANTS,
+                    {
+                        "default": "Q8_0",
+                        "tooltip": (
+                            "Quantisation level. "
+                            "Embedding/LM models fall back to the nearest available quant "
+                            "automatically (mirroring models.sh logic)."
+                        ),
+                    },
+                ),
+                "dit_variant": (
+                    _DIT_VARIANTS,
+                    {"default": "turbo", "tooltip": "DiT model variant to download"},
+                ),
+            },
+            "optional": {
+                "hf_token": (
+                    "STRING",
+                    {
+                        "default": "",
+                        "tooltip": "HuggingFace access token (leave empty for public repos)",
+                    },
+                ),
+                "overwrite": (
+                    "BOOLEAN",
+                    {
+                        "default": False,
+                        "tooltip": "Re-download even if the file already exists",
+                        "label_on": "Overwrite",
+                        "label_off": "Skip existing",
+                    },
+                ),
+            },
+        }
+
+    RETURN_TYPES = ("STRING",)
+    RETURN_NAMES = ("downloaded_files",)
+    FUNCTION = "download"
+    CATEGORY = "AcestepCPP"
+    OUTPUT_NODE = True
+
+    def download(
+        self,
+        save_dir: str,
+        lm_size: str = "4B",
+        quant: str = "Q8_0",
+        dit_variant: str = "turbo",
+        hf_token: str = "",
+        overwrite: bool = False,
+    ):
+        try:
+            from huggingface_hub import hf_hub_download
+        except ImportError:
+            raise RuntimeError(
+                "huggingface_hub is required for model downloading. "
+                "Install it with: pip install huggingface_hub"
+            )
+
+        os.makedirs(save_dir, exist_ok=True)
+        token = hf_token.strip() or None
+
+        lm_type = "lm_4B" if lm_size == "4B" else "lm_small"
+        files_to_download = [
+            "vae-BF16.gguf",
+            f"Qwen3-Embedding-0.6B-{_resolve_quant(quant, 'emb')}.gguf",
+            f"acestep-5Hz-lm-{lm_size}-{_resolve_quant(quant, lm_type)}.gguf",
+            f"acestep-v15-{dit_variant}-{_resolve_quant(quant, 'dit')}.gguf",
+        ]
+
+        downloaded: List[str] = []
+        skipped: List[str] = []
+
+        for filename in files_to_download:
+            dest = os.path.join(save_dir, filename)
+            if os.path.isfile(dest) and not overwrite:
+                print(f"[AcestepCPP] Skip (exists): {filename}")
+                skipped.append(filename)
+                continue
+
+            print(f"[AcestepCPP] Downloading: {filename} ...")
+            hf_hub_download(
+                repo_id=_HF_REPO,
+                filename=filename,
+                local_dir=save_dir,
+                token=token,
+            )
+            print(f"[AcestepCPP] Done: {filename}")
+            downloaded.append(filename)
+
+        summary_parts = []
+        if downloaded:
+            summary_parts.append(f"Downloaded: {', '.join(downloaded)}")
+        if skipped:
+            summary_parts.append(f"Skipped (already exist): {', '.join(skipped)}")
+        summary = "\n".join(summary_parts) if summary_parts else "Nothing to do."
+        return (summary,)
+
+
 
 class AcestepCPPModelLoader:
     """

@@ -4,6 +4,7 @@ ComfyUI custom nodes that wrap [acestep.cpp](https://github.com/audiohacking/ace
 
 ## Features
 
+- **Download** the required GGUF models directly from HuggingFace without leaving ComfyUI
 - Load the four GGUF model files required by acestep.cpp (LM, text encoder, DiT, VAE)
 - Generate music from a caption and optional lyrics/metadata
 - Full control over generation parameters (turbo and SFT presets)
@@ -33,6 +34,16 @@ cmake --build . --config Release -j$(nproc)
 This produces two binaries: `ace-qwen3` (LM) and `dit-vae` (DiT + VAE).
 
 ### 2 – Download GGUF models
+
+**Option A – Acestep.cpp Model Downloader node (recommended)**
+
+After installing this custom node package, use the **Acestep.cpp Model Downloader** node inside ComfyUI. It downloads the required GGUFs from [`Serveurperso/ACE-Step-1.5-GGUF`](https://huggingface.co/Serveurperso/ACE-Step-1.5-GGUF) straight into your model folder. `huggingface_hub` must be available:
+
+```bash
+pip install huggingface_hub
+```
+
+**Option B – Command line**
 
 ```bash
 pip install huggingface_hub[cli]   # installs the 'hf' CLI tool
@@ -82,6 +93,36 @@ Copy `config.example.json` to `config.json` in the node directory and edit it:
 `config.json` is optional; if both binaries are on `PATH` and the GGUF files are in a standard ComfyUI model folder, no configuration file is needed.
 
 ## Node Reference
+
+### Acestep.cpp Model Downloader
+
+Downloads the required ACE-Step GGUF files from [`Serveurperso/ACE-Step-1.5-GGUF`](https://huggingface.co/Serveurperso/ACE-Step-1.5-GGUF) on HuggingFace into a local directory. Quant availability per model type mirrors the logic in `models.sh`.
+
+**Inputs (required)**
+
+| Name | Default | Description |
+|------|---------|-------------|
+| `save_dir` | ComfyUI `text_encoders` folder | Directory to save downloaded GGUF files |
+| `lm_size` | `4B` | LM model size: `4B`, `1.7B`, or `0.6B` |
+| `quant` | `Q8_0` | Quantisation level (falls back to nearest valid quant for each model type) |
+| `dit_variant` | `turbo` | DiT variant: `turbo`, `sft`, `base`, `turbo-shift1`, `turbo-shift3`, `turbo-continuous` |
+
+**Inputs (optional)**
+
+| Name | Default | Description |
+|------|---------|-------------|
+| `hf_token` | *(empty)* | HuggingFace access token (not needed for public repos) |
+| `overwrite` | `false` | Re-download even if the file already exists |
+
+**Outputs**
+
+| Name | Type | Description |
+|------|------|-------------|
+| `downloaded_files` | `STRING` | Summary of files downloaded / skipped |
+
+> **Tip**: Run this node once to populate your model folder, then bypass/disable it and connect the **Model Loader** node to the same `save_dir`.
+
+---
 
 ### Acestep.cpp Model Loader
 
