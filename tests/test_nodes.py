@@ -279,10 +279,13 @@ class TestAcestepCPPBuilder:
 
     def test_cmake_flags_blas(self):
         assert "-DGGML_BLAS=ON" in nodes.AcestepCPPBuilder._cmake_flags("blas")
+    def test_cmake_flags_metal_embeds_library(self):
+        """metal backend must pre-compile Metal shaders at build time to avoid
+        runtime JIT compilation failures (MTLLibraryErrorDomain errors) on
+        certain macOS/Xcode SDK combinations."""
+        assert "-DGGML_METAL_EMBED_LIBRARY=ON" in nodes.AcestepCPPBuilder._cmake_flags("metal")
 
 
-# ===========================================================================
-# _binary_in_build — shared helper for multi-location binary search
 # ===========================================================================
 
 class TestBinaryInBuild:

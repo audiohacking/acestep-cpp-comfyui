@@ -385,7 +385,12 @@ class AcestepCPPBuilder:
         """Translate backend name to CMake -D flags."""
         mapping = {
             "cuda":  ["-DGGML_CUDA=ON"],
-            "metal": [],  # Metal is auto-enabled on macOS by ggml
+            # GGML_METAL_EMBED_LIBRARY=ON pre-compiles Metal shaders at build
+            # time and embeds the resulting binary .metallib in the executable.
+            # This avoids the Metal JIT compilation that happens at runtime when
+            # only source is embedded, which can fail on certain macOS/Xcode SDK
+            # combinations with template type-mismatch errors in the Metal shader.
+            "metal": ["-DGGML_METAL_EMBED_LIBRARY=ON"],
             "blas":  ["-DGGML_BLAS=ON"],
             "cpu":   [],
         }
@@ -1033,9 +1038,25 @@ class AcestepCPPGenerate:
                 lm_cmd, capture_output=True, text=True, cwd=tmpdir
             )
             if lm_result.returncode != 0:
+                stderr = lm_result.stderr
+                # Detect Metal shader JIT compilation failure on macOS and give
+                # a targeted hint: rebuild with GGML_METAL_EMBED_LIBRARY=ON (the
+                # default when using the Builder node) so shaders are compiled at
+                # build time rather than at runtime, avoiding this crash.
+                metal_hint = ""
+                if platform.system() == "Darwin" and "MTLLibraryErrorDomain" in stderr:
+                    metal_hint = (
+                        "\n\nMetal shader compilation failed at runtime. "
+                        "Rebuild the binaries using the 'Acestep.cpp Builder' node "
+                        "(or re-run install.py) so that Metal shaders are compiled "
+                        "at build time and embedded as a binary .metallib — this "
+                        "avoids the Metal JIT compilation step that is failing here. "
+                        "Alternatively, select backend='cpu' in the Builder node to "
+                        "skip Metal entirely."
+                    )
                 raise RuntimeError(
                     f"ace-qwen3 failed (exit {lm_result.returncode}):\n"
-                    f"{lm_result.stderr}"
+                    f"{stderr}{metal_hint}"
                 )
 
             lm_output = os.path.join(tmpdir, "request0.json")
