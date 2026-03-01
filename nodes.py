@@ -38,7 +38,20 @@ def get_merged_model_folders() -> List[str]:
 
 
 def scan_gguf_models() -> List[str]:
-    """Scan all model folders for .gguf files, deduplicated and sorted."""
+    """Scan registered 'acestep_gguf' folder type for .gguf files.
+
+    Tries ComfyUI's folder_paths registry first (so the built-in model
+    manager can track the files), then falls back to manual scanning.
+    """
+    try:
+        all_files = folder_paths.get_filename_list("acestep_gguf")
+        gguf_files = sorted(f for f in all_files if f.lower().endswith(".gguf"))
+        if gguf_files:
+            return gguf_files
+    except Exception:
+        pass
+
+    # Fallback: manual scan of text_encoders + user-configured folders
     seen_models: set = set()
     models: List[str] = []
     for folder in get_merged_model_folders():
@@ -871,6 +884,13 @@ class AcestepCPPGenerate:
         lora: Optional[Dict[str, Any]] = None,
     ):
         import torchaudio
+
+        # Coerce optional FLOAT inputs that may arrive as empty strings from
+        # workflows saved with an older version of the node schema.
+        if isinstance(lm_top_p, str):
+            lm_top_p = float(lm_top_p) if lm_top_p.strip() else 0.9
+        if isinstance(audio_cover_strength, str):
+            audio_cover_strength = float(audio_cover_strength) if audio_cover_strength.strip() else 1.0
 
         ace_qwen3 = get_binary_path("ace-qwen3")
         dit_vae = get_binary_path("dit-vae")

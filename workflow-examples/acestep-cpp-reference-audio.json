@@ -5,8 +5,14 @@
     {
       "id": 1,
       "type": "AcestepCPPModelLoader",
-      "pos": [20, 380],
-      "size": {"0": 380, "1": 154},
+      "pos": [
+        20,
+        380
+      ],
+      "size": {
+        "0": 380,
+        "1": 154
+      },
       "flags": {},
       "order": 0,
       "mode": 0,
@@ -15,11 +21,15 @@
         {
           "name": "models",
           "type": "ACESTEP_MODELS",
-          "links": [1],
+          "links": [
+            1
+          ],
           "slot_index": 0
         }
       ],
-      "properties": {"Node name for S&R": "AcestepCPPModelLoader"},
+      "properties": {
+        "Node name for S&R": "AcestepCPPModelLoader"
+      },
       "widgets_values": [
         "acestep-5Hz-lm-4B-Q8_0.gguf",
         "Qwen3-Embedding-0.6B-Q8_0.gguf",
@@ -30,8 +40,14 @@
     {
       "id": 4,
       "type": "LoadAudio",
-      "pos": [20, 140],
-      "size": {"0": 380, "1": 76},
+      "pos": [
+        20,
+        140
+      ],
+      "size": {
+        "0": 380,
+        "1": 76
+      },
       "flags": {},
       "order": 1,
       "mode": 0,
@@ -40,36 +56,68 @@
         {
           "name": "audio",
           "type": "AUDIO",
-          "links": [3],
+          "links": [
+            3
+          ],
           "slot_index": 0
         }
       ],
-      "properties": {"Node name for S&R": "LoadAudio"},
-      "widgets_values": ["reference.wav"]
+      "properties": {
+        "Node name for S&R": "LoadAudio"
+      },
+      "widgets_values": [
+        "reference.wav"
+      ]
     },
     {
       "id": 2,
       "type": "AcestepCPPGenerate",
-      "pos": [420, 20],
-      "size": {"0": 440, "1": 698},
+      "pos": [
+        420,
+        20
+      ],
+      "size": {
+        "0": 440,
+        "1": 698
+      },
       "flags": {},
       "order": 2,
       "mode": 0,
       "inputs": [
-        {"name": "models", "type": "ACESTEP_MODELS", "link": 1},
-        {"name": "reference_audio_input", "type": "AUDIO", "link": 3},
-        {"name": "src_audio_input", "type": "AUDIO", "link": null},
-        {"name": "lora", "type": "ACESTEP_LORA", "link": null}
+        {
+          "name": "models",
+          "type": "ACESTEP_MODELS",
+          "link": 1
+        },
+        {
+          "name": "reference_audio_input",
+          "type": "AUDIO",
+          "link": 3
+        },
+        {
+          "name": "src_audio_input",
+          "type": "AUDIO",
+          "link": null
+        },
+        {
+          "name": "lora",
+          "type": "ACESTEP_LORA",
+          "link": null
+        }
       ],
       "outputs": [
         {
           "name": "audio",
           "type": "AUDIO",
-          "links": [2],
+          "links": [
+            2
+          ],
           "slot_index": 0
         }
       ],
-      "properties": {"Node name for S&R": "AcestepCPPGenerate"},
+      "properties": {
+        "Node name for S&R": "AcestepCPPGenerate"
+      },
       "widgets_values": [
         "Upbeat pop rock with driving guitars and catchy hooks",
         "",
@@ -97,27 +145,92 @@
     },
     {
       "id": 3,
-      "type": "PreviewAudio",
-      "pos": [880, 20],
-      "size": {"0": 320, "1": 60},
+      "type": "SaveAudio",
+      "pos": [
+        880,
+        20
+      ],
+      "size": {
+        "0": 320,
+        "1": 130
+      },
       "flags": {},
       "order": 3,
       "mode": 0,
       "inputs": [
-        {"name": "audio", "type": "AUDIO", "link": 2}
+        {
+          "name": "audio",
+          "type": "AUDIO",
+          "link": 2
+        }
       ],
       "outputs": [],
-      "properties": {"Node name for S&R": "PreviewAudio"},
-      "widgets_values": []
+      "properties": {
+        "Node name for S&R": "SaveAudio"
+      },
+      "widgets_values": [
+        "acestep/output"
+      ]
     }
   ],
   "links": [
-    [1, 1, 0, 2, 0, "ACESTEP_MODELS"],
-    [2, 2, 0, 3, 0, "AUDIO"],
-    [3, 4, 0, 2, 1, "AUDIO"]
+    [
+      1,
+      1,
+      0,
+      2,
+      0,
+      "ACESTEP_MODELS"
+    ],
+    [
+      2,
+      2,
+      0,
+      3,
+      0,
+      "AUDIO"
+    ],
+    [
+      3,
+      4,
+      0,
+      2,
+      1,
+      "AUDIO"
+    ]
   ],
   "groups": [],
   "config": {},
-  "extra": {"ds": {"scale": 0.7, "offset": [0, 0]}},
+  "extra": {
+    "ds": {
+      "scale": 0.7,
+      "offset": [
+        0,
+        0
+      ]
+    },
+    "models": [
+      {
+        "name": "acestep-5Hz-lm-4B-Q8_0.gguf",
+        "url": "https://huggingface.co/Serveurperso/ACE-Step-1.5-GGUF/resolve/main/acestep-5Hz-lm-4B-Q8_0.gguf",
+        "save_path": "text_encoders/acestep-5Hz-lm-4B-Q8_0.gguf"
+      },
+      {
+        "name": "Qwen3-Embedding-0.6B-Q8_0.gguf",
+        "url": "https://huggingface.co/Serveurperso/ACE-Step-1.5-GGUF/resolve/main/Qwen3-Embedding-0.6B-Q8_0.gguf",
+        "save_path": "text_encoders/Qwen3-Embedding-0.6B-Q8_0.gguf"
+      },
+      {
+        "name": "acestep-v15-turbo-Q8_0.gguf",
+        "url": "https://huggingface.co/Serveurperso/ACE-Step-1.5-GGUF/resolve/main/acestep-v15-turbo-Q8_0.gguf",
+        "save_path": "text_encoders/acestep-v15-turbo-Q8_0.gguf"
+      },
+      {
+        "name": "vae-BF16.gguf",
+        "url": "https://huggingface.co/Serveurperso/ACE-Step-1.5-GGUF/resolve/main/vae-BF16.gguf",
+        "save_path": "text_encoders/vae-BF16.gguf"
+      }
+    ]
+  },
   "version": 0.4
 }

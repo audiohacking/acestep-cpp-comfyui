@@ -1,3 +1,16 @@
+import os
+
+try:
+    import folder_paths as _fp
+
+    # Register a dedicated model type for ACE-Step GGUF files.
+    # This makes the files appear in ComfyUI's model manager, enables the
+    # built-in download prompt, and lets get_filename_list() find them.
+    for _p in _fp.get_folder_paths("text_encoders"):
+        _fp.add_model_folder_path("acestep_gguf", _p)
+except Exception:
+    pass
+
 from .nodes import AcestepCPPModelLoader, AcestepCPPLoraLoader, AcestepCPPModelDownloader, AcestepCPPBuilder, AcestepCPPGenerate
 
 NODE_CLASS_MAPPINGS = {
