@@ -1,0 +1,186 @@
+name: MPS/Metal CI (comfy-action)
+
+# End-to-end CI for the macOS MPS/Metal backend using Comfy-Org/comfy-action.
+#
+# comfy-action is designed to run inside a ComfyUI repository workspace (it
+# calls `python main.py`).  For a custom node repo we therefore:
+#   1. Use comfy-cli (the official Comfy-Org CLI used by comfy-action) to
+#      install ComfyUI into $GITHUB_WORKSPACE so that `main.py` is present.
+#   2. Install this custom node into ComfyUI's custom_nodes directory.
+#   3. Build the C++ binaries — install.py now passes
+#      -DGGML_METAL_EMBED_LIBRARY=ON so Metal shaders are compiled at build
+#      time, avoiding the runtime JIT failures (MTLLibraryErrorDomain / exit
+#      -6 / SIGABRT) that caused this issue.
+#   4. Run a fast Metal smoke test that exercises binary start-up without
+#      needing any model files.
+#   5. Download the minimum GGUF model set (cached between runs).
+#   6. Execute the text2music workflow via Comfy-Org/comfy-action which starts
+#      ComfyUI, submits the workflow JSON over the HTTP API, and verifies the
+#      output — the same detection path that would have caught the MPS failure.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test-mps:
+    name: E2E test – macOS MPS/Metal (comfy-action)
+    # macos-latest uses an Apple Silicon (M-series) hosted runner, giving us a
+    # real Metal/MPS environment without a self-hosted machine.
+    runs-on: macos-latest
+    permissions:
+      contents: read
+
+    steps:
+      # -----------------------------------------------------------------------
+      # Step 1 – Check out our custom node source to a subdirectory so that
+      # the workspace root can be taken over by the ComfyUI installation that
+      # comfy-action expects to find there (main.py etc.).
+      # -----------------------------------------------------------------------
+      - name: Checkout custom node source
+        uses: actions/checkout@v4
+        with:
+          path: node_src
+
+      # -----------------------------------------------------------------------
+      # Step 2 – Python + comfy-cli setup.
+      # comfy-cli is the official Comfy-Org CLI; it is also installed by
+      # comfy-action itself during its dependency step.
+      # -----------------------------------------------------------------------
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install comfy-cli and build tools
+        run: |
+          pip install comfy-cli
+          brew install cmake
+
+      # -----------------------------------------------------------------------
+      # Step 3 – Install ComfyUI into the workspace root.
+      # After this step $GITHUB_WORKSPACE contains main.py, requirements.txt,
+      # models/, custom_nodes/ etc. — the layout comfy-action expects.
+      # -----------------------------------------------------------------------
+      - name: Install ComfyUI into workspace root
+        run: |
+          comfy --skip-cuda-check install \
+            --workspace "$GITHUB_WORKSPACE" \
+            --version nightly
+
+      # -----------------------------------------------------------------------
+      # Step 4 – Copy our custom node into ComfyUI's custom_nodes directory and
+      # build the C++ binaries.  install.py now passes
+      # -DGGML_METAL_EMBED_LIBRARY=ON so the Metal .metallib is compiled at
+      # cmake build time and embedded in the binary.  This avoids the runtime
+      # JIT compilation step that was crashing with MTLLibraryErrorDomain
+      # errors on certain macOS/Xcode SDK combinations.
+      # -----------------------------------------------------------------------
+      - name: Install custom node into ComfyUI
+        run: |
+          cp -r node_src "$GITHUB_WORKSPACE/custom_nodes/acestep-cpp-comfyui"
+
+      - name: Build C++ binaries (GGML_METAL_EMBED_LIBRARY=ON)
+        run: python "$GITHUB_WORKSPACE/custom_nodes/acestep-cpp-comfyui/install.py"
+
+      # -----------------------------------------------------------------------
+      # Step 5 – Metal initialisation smoke test.
+      # ace-qwen3 initialises the Metal device at process start-up, before it
+      # reads any model file.  Running it against a nonexistent path is
+      # therefore enough to detect the SIGABRT (exit 134) caused by the Metal
+      # JIT shader-compilation failure from the original bug report.
+      # -----------------------------------------------------------------------
+      - name: Metal initialisation smoke test
+        run: |
+          BUILD="$GITHUB_WORKSPACE/custom_nodes/acestep-cpp-comfyui/acestep.cpp/build"
+          if   [ -f "$BUILD/ace-qwen3" ];     then BIN="$BUILD/ace-qwen3"
+          elif [ -f "$BUILD/bin/ace-qwen3" ]; then BIN="$BUILD/bin/ace-qwen3"
+          else echo "ace-qwen3 not found" && exit 1
+          fi
+
+          echo '{"task_type":"text2music","caption":"ci","seed":42}' \
+            > /tmp/smoke.json
+
+          set +e
+          "$BIN" --request /tmp/smoke.json --model /tmp/no-such-model.gguf \
+            2>&1 | head -60
+          EXIT=$?
+          set -e
+
+          if [ "$EXIT" = "134" ]; then
+            echo "FAIL: ace-qwen3 exited with SIGABRT (134)."
+            echo "      Metal shader JIT compilation failed (MTLLibraryErrorDomain)."
+            echo "      Rebuild with GGML_METAL_EMBED_LIBRARY=ON (now the default)"
+            echo "      or use the Builder node with backend=cpu."
+            exit 1
+          fi
+          echo "OK: Metal initialised successfully (exit $EXIT; model-not-found is expected)"
+
+      # -----------------------------------------------------------------------
+      # Step 6 – Download the smallest viable GGUF model set with caching.
+      # We pick the 0.6B LM and Q4_K_M DiT to minimise download size while
+      # still exercising the full ace-qwen3 → dit-vae pipeline.
+      # -----------------------------------------------------------------------
+      - name: Cache GGUF models
+        uses: actions/cache@v4
+        with:
+          path: ~/gguf-model-cache
+          key: gguf-models-0.6B-Q4KM-v1
+
+      - name: Download GGUF models
+        run: |
+          BASE="https://huggingface.co/Serveurperso/ACE-Step-1.5-GGUF/resolve/main"
+          CACHE="$HOME/gguf-model-cache"
+          DEST="$GITHUB_WORKSPACE/models/text_encoders"
+          mkdir -p "$CACHE" "$DEST"
+
+          fetch() {
+            local name="$1"
+            if [ -f "$CACHE/$name" ]; then
+              echo "✓ $name (cached)"
+            else
+              echo "↓ $name"
+              curl -fL -o "$CACHE/$name" "$BASE/$name"
+            fi
+            cp "$CACHE/$name" "$DEST/$name"
+          }
+
+          fetch "vae-BF16.gguf"
+          fetch "Qwen3-Embedding-0.6B-Q8_0.gguf"
+          fetch "acestep-5Hz-lm-0.6B-Q8_0.gguf"
+          fetch "acestep-v15-turbo-Q4_K_M.gguf"
+
+      # -----------------------------------------------------------------------
+      # Step 7 – Run the text2music workflow via Comfy-Org/comfy-action.
+      #
+      # At this point $GITHUB_WORKSPACE IS a valid ComfyUI installation
+      # (main.py, requirements.txt, models/, custom_nodes/ all present).
+      # comfy-action will:
+      #   a) re-checkout this repo (our custom node) — harmless because we
+      #      already copied the node into custom_nodes/ above;
+      #   b) install ComfyUI Python deps (requirements.txt already present);
+      #   c) start `python main.py` from $GITHUB_WORKSPACE (ComfyUI root);
+      #   d) submit acestep-cpp-text2music.json via the HTTP API;
+      #   e) verify the output audio file is produced.
+      #
+      # A Metal JIT failure in ace-qwen3 / dit-vae would surface here as the
+      # workflow node raising a RuntimeError, failing the CI job.
+      # -----------------------------------------------------------------------
+      - name: Run text2music workflow via comfy-action (MPS/Metal)
+        uses: Comfy-Org/comfy-action@main
+        with:
+          os: macos
+          python_version: "3.11"
+          torch_version: stable
+          workflow_filenames: acestep-cpp-text2music.json
+          comfyui_flags: "--force-fp16"
+          timeout: "600"
+          models-json: >-
+            {
+              "vae-BF16.gguf":                      { "url": "https://huggingface.co/Serveurperso/ACE-Step-1.5-GGUF/resolve/main/vae-BF16.gguf",                      "directory": "text_encoders" },
+              "Qwen3-Embedding-0.6B-Q8_0.gguf":     { "url": "https://huggingface.co/Serveurperso/ACE-Step-1.5-GGUF/resolve/main/Qwen3-Embedding-0.6B-Q8_0.gguf",     "directory": "text_encoders" },
+              "acestep-5Hz-lm-0.6B-Q8_0.gguf":      { "url": "https://huggingface.co/Serveurperso/ACE-Step-1.5-GGUF/resolve/main/acestep-5Hz-lm-0.6B-Q8_0.gguf",      "directory": "text_encoders" },
+              "acestep-v15-turbo-Q4_K_M.gguf":      { "url": "https://huggingface.co/Serveurperso/ACE-Step-1.5-GGUF/resolve/main/acestep-v15-turbo-Q4_K_M.gguf",      "directory": "text_encoders" }
+            }
