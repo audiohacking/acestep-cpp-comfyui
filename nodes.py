@@ -61,6 +61,8 @@ def find_model_path(model_name: str) -> Optional[str]:
     return None
 
 
+
+
 def get_binary_path(binary_name: str) -> Optional[str]:
     """
     Locate an acestep.cpp binary.
@@ -452,6 +454,67 @@ class AcestepCPPBuilder:
         return ("\n".join(log),)
 
 
+class AcestepCPPLoraLoader:
+    """
+    Specify a LoRA adapter file for use with acestep.cpp.
+
+    Enter the full path to any ``.gguf`` or ``.safetensors`` LoRA file on
+    your filesystem. Outputs an ``ACESTEP_LORA`` dict consumed by the
+    generator node.
+    """
+
+    _ALLOWED_EXTENSIONS = (".gguf", ".safetensors")
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "lora_path": (
+                    "STRING",
+                    {
+                        "default": "",
+                        "tooltip": (
+                            "Full path to a LoRA adapter file (.gguf or .safetensors). "
+                            "You can use any file location on your filesystem."
+                        ),
+                    },
+                ),
+                "lora_scale": (
+                    "FLOAT",
+                    {
+                        "default": 1.0,
+                        "min": 0.0,
+                        "max": 2.0,
+                        "step": 0.01,
+                        "tooltip": "LoRA adapter scale",
+                    },
+                ),
+            }
+        }
+
+    RETURN_TYPES = ("ACESTEP_LORA",)
+    RETURN_NAMES = ("lora",)
+    FUNCTION = "load_lora"
+    CATEGORY = "AcestepCPP"
+
+    def load_lora(self, lora_path: str, lora_scale: float):
+        path = lora_path.strip()
+        if not path:
+            raise ValueError(
+                "lora_path is empty. Enter the full path to your LoRA file."
+            )
+        if not any(path.lower().endswith(ext) for ext in self._ALLOWED_EXTENSIONS):
+            raise ValueError(
+                f"Unsupported LoRA file type: {path!r}. "
+                f"Expected one of: {', '.join(self._ALLOWED_EXTENSIONS)}"
+            )
+        if not os.path.isfile(path):
+            raise FileNotFoundError(
+                f"LoRA file not found: {path}"
+            )
+        return ({"path": path, "scale": lora_scale},)
+
+
 class AcestepCPPModelLoader:
     """
     Select the four GGUF model files required by acestep.cpp.
@@ -741,6 +804,35 @@ class AcestepCPPGenerate:
                         "tooltip": "LoRA adapter scale",
                     },
                 ),
+                "reference_audio_input": (
+                    "AUDIO",
+                    {
+                        "tooltip": (
+                            "Reference audio for timbre transfer, connected from a "
+                            "Load Audio node. Overrides the 'reference_audio' path "
+                            "string when connected."
+                        ),
+                    },
+                ),
+                "src_audio_input": (
+                    "AUDIO",
+                    {
+                        "tooltip": (
+                            "Source audio for cover/repaint mode, connected from a "
+                            "Load Audio node. Overrides the 'src_audio' path string "
+                            "when connected."
+                        ),
+                    },
+                ),
+                "lora": (
+                    "ACESTEP_LORA",
+                    {
+                        "tooltip": (
+                            "LoRA adapter from the Acestep.cpp LoRA Loader node. "
+                            "Overrides 'lora_path' / 'lora_scale' when connected."
+                        ),
+                    },
+                ),
             },
         }
 
@@ -774,6 +866,9 @@ class AcestepCPPGenerate:
         audio_cover_strength: float = 1.0,
         lora_path: str = "",
         lora_scale: float = 1.0,
+        reference_audio_input: Optional[Dict[str, Any]] = None,
+        src_audio_input: Optional[Dict[str, Any]] = None,
+        lora: Optional[Dict[str, Any]] = None,
     ):
         import torchaudio
 
@@ -793,7 +888,33 @@ class AcestepCPPGenerate:
                 "or add the binary to your PATH."
             )
 
+        # If a LoRA was supplied via the LoRA Loader node, it takes priority
+        # over the freeform lora_path / lora_scale widget values.
+        if lora is not None:
+            lora_path = lora["path"]
+            lora_scale = lora["scale"]
+
         with tempfile.TemporaryDirectory() as tmpdir:
+            # Materialise AUDIO tensor inputs as WAV files so the binary can
+            # read them.  These override the freeform string-path widgets.
+            if reference_audio_input is not None:
+                ref_wav = os.path.join(tmpdir, "reference_audio.wav")
+                torchaudio.save(
+                    ref_wav,
+                    reference_audio_input["waveform"].squeeze(0),
+                    reference_audio_input["sample_rate"],
+                )
+                reference_audio = ref_wav
+
+            if src_audio_input is not None:
+                src_wav = os.path.join(tmpdir, "src_audio.wav")
+                torchaudio.save(
+                    src_wav,
+                    src_audio_input["waveform"].squeeze(0),
+                    src_audio_input["sample_rate"],
+                )
+                src_audio = src_wav
+
             request_path = os.path.join(tmpdir, "request.json")
 
             request: Dict[str, Any] = {

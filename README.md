@@ -7,10 +7,13 @@ ComfyUI custom nodes that wrap [acestep.cpp](https://github.com/audiohacking/ace
 - **Build** the `ace-qwen3` and `dit-vae` binaries from source via the **Acestep.cpp Builder** node (no terminal required)
 - **Download** the required GGUF models directly from HuggingFace without leaving ComfyUI
 - Load the four GGUF model files required by acestep.cpp (LM, text encoder, DiT, VAE)
+- Load LoRA adapters from a dedicated **Acestep.cpp LoRA Loader** node (scans `loras/` subdirectories)
 - Generate music from a caption and optional lyrics/metadata
 - Full control over generation parameters (turbo and SFT presets)
 - Cover mode, reference-audio timbre transfer, and LoRA adapter support
+- Connect **AUDIO tensors** from any `LoadAudio` node directly to the generator for reference/source audio
 - Returns a ComfyUI **AUDIO** tensor, compatible with any audio preview or save node
+- Ready-to-use **example workflows** in `workflow-examples/`
 
 ## Prerequisites
 
@@ -116,6 +119,19 @@ Copy `config.example.json` to `config.json` in the node directory and edit it:
 
 `config.json` is optional; if both binaries are on `PATH` and the GGUF files are in a standard ComfyUI model folder, no configuration file is needed.
 
+## Example Workflows
+
+Ready-to-use workflow JSON files are in the `workflow-examples/` directory. Drag one onto the ComfyUI canvas or load it via *Load workflow*.
+
+| File | Description |
+|------|-------------|
+| `acestep-cpp-text2music.json` | Basic text-to-music generation |
+| `acestep-cpp-lora.json` | Text-to-music with a LoRA adapter |
+| `acestep-cpp-reference-audio.json` | Timbre transfer using a reference audio file |
+| `acestep-cpp-cover.json` | Cover/remix mode using a source audio file |
+
+> **Prerequisites**: download the GGUF models (use the **Model Downloader** node) and build the binaries (use the **Builder** node) before running a generation workflow.
+
 ## Node Reference
 
 ### Acestep.cpp Builder
@@ -196,6 +212,26 @@ Selects the four GGUF model files and validates that they exist on disk.
 
 ---
 
+### Acestep.cpp LoRA Loader
+
+Specify a LoRA adapter file and scale, ready to connect to the **Generate** node.
+Enter the full path to any `.gguf` or `.safetensors` LoRA file anywhere on your filesystem.
+
+**Inputs (required)**
+
+| Name | Description |
+|------|-------------|
+| `lora_path` | Full filesystem path to the LoRA adapter file (`.gguf` or `.safetensors`) |
+| `lora_scale` | Adapter scale (default `1.0`) |
+
+**Outputs**
+
+| Name | Type | Description |
+|------|------|-------------|
+| `lora` | `ACESTEP_LORA` | LoRA bundle passed to the generator |
+
+---
+
 ### Acestep.cpp Generate
 
 Runs `ace-qwen3` (LM) then `dit-vae` (DiT + VAE) and returns the generated audio.
@@ -227,11 +263,14 @@ Runs `ace-qwen3` (LM) then `dit-vae` (DiT + VAE) and returns the generated audio
 | `lm_cfg_scale` | `2.0` | LM classifier-free guidance scale |
 | `lm_top_p` | `0.9` | LM nucleus sampling probability |
 | `lm_negative_prompt` | *(empty)* | Negative prompt for the LM |
-| `reference_audio` | *(empty)* | Path to a WAV/MP3 for timbre transfer |
-| `src_audio` | *(empty)* | Path to a WAV/MP3 source for cover mode |
+| `reference_audio` | *(empty)* | Path to a WAV/MP3 for timbre transfer (use `reference_audio_input` instead when possible) |
+| `src_audio` | *(empty)* | Path to a WAV/MP3 source for cover mode (use `src_audio_input` instead when possible) |
 | `audio_cover_strength` | `1.0` | Cover influence strength (0 = silence, 1 = full) |
-| `lora_path` | *(empty)* | Path to a DiT LoRA adapter file |
+| `lora_path` | *(empty)* | Path to a DiT LoRA adapter file (use the LoRA Loader node instead when possible) |
 | `lora_scale` | `1.0` | LoRA adapter scale |
+| `reference_audio_input` | *(not connected)* | **AUDIO** tensor for timbre transfer — connect from a `Load Audio` node; overrides `reference_audio` |
+| `src_audio_input` | *(not connected)* | **AUDIO** tensor for cover/repaint — connect from a `Load Audio` node; overrides `src_audio` |
+| `lora` | *(not connected)* | **ACESTEP_LORA** from the LoRA Loader node; overrides `lora_path` / `lora_scale` |
 
 **Outputs**
 
