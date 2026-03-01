@@ -170,6 +170,47 @@ class TestWorkflowStructure:
             assert m.get("save_path") == expected, \
                 f"save_path mismatch for {m['name']}: {m.get('save_path')}"
 
+    # --- Node properties models (ComfyUI auto-download) ------------------
+
+    def test_model_loader_properties_has_models(self, workflow_path):
+        """AcestepCPPModelLoader.properties must include a 'models' list."""
+        wf = _load(workflow_path)
+        for node in _nodes_by_type(wf, "AcestepCPPModelLoader"):
+            models = node.get("properties", {}).get("models")
+            assert isinstance(models, list) and len(models) == 4, \
+                "AcestepCPPModelLoader properties must have exactly 4 model entries"
+
+    def test_model_loader_properties_models_names(self, workflow_path):
+        """Models in node properties must match expected GGUF filenames."""
+        wf = _load(workflow_path)
+        for node in _nodes_by_type(wf, "AcestepCPPModelLoader"):
+            names = {m["name"] for m in node["properties"].get("models", [])}
+            assert names == EXPECTED_MODEL_NAMES
+
+    def test_model_loader_properties_models_urls(self, workflow_path):
+        """Models in node properties must have HuggingFace download URLs."""
+        wf = _load(workflow_path)
+        for node in _nodes_by_type(wf, "AcestepCPPModelLoader"):
+            for m in node["properties"].get("models", []):
+                assert m.get("url", "").startswith(HF_BASE), \
+                    f"{m.get('name')} has unexpected URL: {m.get('url')}"
+
+    def test_model_loader_properties_models_directory(self, workflow_path):
+        """Models in node properties must specify 'text_encoders' directory."""
+        wf = _load(workflow_path)
+        for node in _nodes_by_type(wf, "AcestepCPPModelLoader"):
+            for m in node["properties"].get("models", []):
+                assert m.get("directory") == "text_encoders", \
+                    f"{m.get('name')} directory should be 'text_encoders', got {m.get('directory')!r}"
+
+    def test_model_loader_properties_models_url_matches_name(self, workflow_path):
+        """Each model's URL must end with its filename."""
+        wf = _load(workflow_path)
+        for node in _nodes_by_type(wf, "AcestepCPPModelLoader"):
+            for m in node["properties"].get("models", []):
+                assert m.get("url", "").endswith(m["name"]), \
+                    f"URL does not end with filename for {m['name']}: {m.get('url')}"
+
     # --- Graph connectivity -----------------------------------------------
 
     def test_model_loader_output_connected(self, workflow_path):
