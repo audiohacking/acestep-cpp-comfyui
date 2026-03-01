@@ -9,6 +9,28 @@ try:
 except Exception:
     pass
 
+# Run the same auto-build that ComfyUI Manager triggers via install.py so
+# that manual git-clone users also get the binaries built automatically the
+# first time ComfyUI loads this node.
+try:
+    import threading as _threading
+    from .install import install as _install
+
+    def _background_install():
+        try:
+            _install()
+        except Exception as _exc:
+            print(
+                f"[acestep-cpp] Background build failed: {_exc}\n"
+                "[acestep-cpp] Use the 'Acestep.cpp Builder' node or run "
+                "install.py from the node directory for detailed output.",
+                flush=True,
+            )
+
+    _threading.Thread(target=_background_install, daemon=True).start()
+except Exception:
+    pass
+
 try:
     from .nodes import AcestepCPPModelLoader, AcestepCPPLoraLoader, AcestepCPPModelDownloader, AcestepCPPBuilder, AcestepCPPGenerate
 

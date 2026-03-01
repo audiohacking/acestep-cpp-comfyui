@@ -89,7 +89,7 @@ def get_binary_path(binary_name: str) -> Optional[str]:
     Search order:
       1. Explicit path from config.json ``binary_paths`` mapping.
       2. System PATH (via shutil.which).
-      3. ``<node_dir>/acestep.cpp/build/<binary_name>`` (local build alongside the node).
+      3. ``<node_dir>/acestep.cpp/build/`` (local build alongside the node).
     """
     config = load_config()
     explicit = config.get("binary_paths", {}).get(binary_name)
@@ -100,8 +100,9 @@ def get_binary_path(binary_name: str) -> Optional[str]:
     if on_path:
         return on_path
 
-    local = os.path.join(os.path.dirname(__file__), "acestep.cpp", "build", binary_name)
-    if os.path.isfile(local):
+    local_dir = os.path.join(os.path.dirname(__file__), "acestep.cpp", "build")
+    local = shutil.which(binary_name, path=local_dir)
+    if local:
         return local
 
     return None
@@ -454,11 +455,11 @@ class AcestepCPPBuilder:
         self._run(build_cmd, cwd=build_dir, log_lines=log)
 
         # --- Verify outputs ---------------------------------------------------
-        missing = []
-        for binary in self._BINARIES:
-            path = os.path.join(build_dir, binary)
-            if not os.path.isfile(path):
-                missing.append(binary)
+        # shutil.which also confirms the binary is executable, not just present.
+        missing = [
+            b for b in self._BINARIES
+            if not shutil.which(b, path=build_dir)
+        ]
 
         if missing:
             raise RuntimeError(
@@ -860,6 +861,31 @@ class AcestepCPPGenerate:
     FUNCTION = "generate"
     CATEGORY = "AcestepCPP"
 
+    @classmethod
+    def VALIDATE_INPUTS(cls, lm_top_p=0.9, audio_cover_strength=1.0, **kwargs):
+        """Allow older workflows that store lm_top_p / audio_cover_strength as
+        an empty string instead of a float.
+
+        ComfyUI skips its own ``float()`` conversion check for any input whose
+        name appears in this method's signature, passing the raw value directly
+        to ``generate()`` instead.  ``_coerce_float`` then converts ``""`` to
+        the numeric default at runtime.
+
+        Empty strings are intentionally allowed here — they will be coerced to
+        the numeric default by ``_coerce_float`` inside ``generate()``.  Only
+        non-empty strings that cannot be parsed as a float are rejected.
+        """
+        for name, val in (
+            ("lm_top_p", lm_top_p),
+            ("audio_cover_strength", audio_cover_strength),
+        ):
+            if isinstance(val, str) and val.strip():
+                try:
+                    float(val)
+                except ValueError:
+                    return f"Invalid value for {name}: {val!r}"
+        return True
+
     def generate(
         self,
         models: Dict[str, Any],
@@ -902,14 +928,14 @@ class AcestepCPPGenerate:
         if not ace_qwen3:
             raise FileNotFoundError(
                 "ace-qwen3 binary not found. "
-                "Build acestep.cpp and set binary_paths.ace-qwen3 in config.json, "
-                "or add the binary to your PATH."
+                "Use the 'Acestep.cpp Builder' node to build it automatically, "
+                "or run install.py from the node directory."
             )
         if not dit_vae:
             raise FileNotFoundError(
                 "dit-vae binary not found. "
-                "Build acestep.cpp and set binary_paths.dit-vae in config.json, "
-                "or add the binary to your PATH."
+                "Use the 'Acestep.cpp Builder' node to build it automatically, "
+                "or run install.py from the node directory."
             )
 
         # If a LoRA was supplied via the LoRA Loader node, it takes priority

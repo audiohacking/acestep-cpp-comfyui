@@ -89,7 +89,7 @@ def install() -> None:
 
     # Skip rebuild if both binaries already exist
     build_dir = os.path.join(REPO_DIR, "build")
-    if all(os.path.isfile(os.path.join(build_dir, b)) for b in BINARIES):
+    if all(shutil.which(b, path=build_dir) for b in BINARIES):
         print(
             f"[acestep-cpp] Binaries already present in {build_dir} — skipping build.",
             flush=True,
@@ -127,7 +127,7 @@ def install() -> None:
     )
 
     # Verify
-    missing = [b for b in BINARIES if not os.path.isfile(os.path.join(build_dir, b))]
+    missing = [b for b in BINARIES if not shutil.which(b, path=build_dir)]
     if missing:
         raise RuntimeError(
             f"Build finished but expected binaries not found: {', '.join(missing)}"
