@@ -61,6 +61,58 @@ def find_model_path(model_name: str) -> Optional[str]:
     return None
 
 
+def get_lora_folders() -> List[str]:
+    """Return directories to scan for LoRA GGUF files.
+
+    Checks (in order):
+      1. A ``loras/`` subdirectory inside each model folder.
+      2. ComfyUI's standard ``loras`` folder.
+      3. User-configured ``lora_folders`` from config.json.
+    """
+    dirs: List[str] = []
+    for folder in get_merged_model_folders():
+        lora_sub = os.path.join(folder, "loras")
+        if os.path.isdir(lora_sub):
+            dirs.append(lora_sub)
+    try:
+        dirs += folder_paths.get_folder_paths("loras")
+    except Exception:
+        pass
+    dirs += load_config().get("lora_folders", [])
+    # deduplicate while preserving order
+    seen_dirs: set = set()
+    result: List[str] = []
+    for d in dirs:
+        if d not in seen_dirs and os.path.isdir(d):
+            result.append(d)
+            seen_dirs.add(d)
+    return result
+
+
+def scan_lora_models() -> List[str]:
+    """Scan lora folders for .gguf files, deduplicated and sorted."""
+    seen_models: set = set()
+    models: List[str] = []
+    for folder in get_lora_folders():
+        try:
+            for name in os.listdir(folder):
+                if name.lower().endswith(".gguf") and name not in seen_models:
+                    models.append(name)
+                    seen_models.add(name)
+        except OSError:
+            pass
+    return sorted(models)
+
+
+def find_lora_path(model_name: str) -> Optional[str]:
+    """Return the full path to a LoRA GGUF file, or None if not found."""
+    for folder in get_lora_folders():
+        path = os.path.join(folder, model_name)
+        if os.path.isfile(path):
+            return path
+    return None
+
+
 def get_binary_path(binary_name: str) -> Optional[str]:
     """
     Locate an acestep.cpp binary.
@@ -452,6 +504,56 @@ class AcestepCPPBuilder:
         return ("\n".join(log),)
 
 
+class AcestepCPPLoraLoader:
+    """
+    Select a LoRA adapter GGUF file for use with acestep.cpp.
+
+    Scans the ``loras/`` subdirectories of each model folder (and any
+    ComfyUI ``loras`` folder or user-configured ``lora_folders`` from
+    config.json) for ``.gguf`` files.
+
+    Outputs an ``ACESTEP_LORA`` dict consumed by the generator node.
+    """
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        lora_list = scan_lora_models()
+        options = lora_list if lora_list else ["No LoRA models found"]
+        return {
+            "required": {
+                "lora_model": (
+                    options,
+                    {"tooltip": "LoRA adapter GGUF file"},
+                ),
+                "lora_scale": (
+                    "FLOAT",
+                    {
+                        "default": 1.0,
+                        "min": 0.0,
+                        "max": 2.0,
+                        "step": 0.01,
+                        "tooltip": "LoRA adapter scale",
+                    },
+                ),
+            }
+        }
+
+    RETURN_TYPES = ("ACESTEP_LORA",)
+    RETURN_NAMES = ("lora",)
+    FUNCTION = "load_lora"
+    CATEGORY = "AcestepCPP"
+
+    def load_lora(self, lora_model: str, lora_scale: float):
+        path = find_lora_path(lora_model)
+        if path is None:
+            raise FileNotFoundError(
+                f"Could not locate LoRA file: {lora_model}. "
+                "Place LoRA GGUFs in a 'loras/' subdirectory of your model "
+                "folder, or configure 'lora_folders' in config.json."
+            )
+        return ({"path": path, "scale": lora_scale},)
+
+
 class AcestepCPPModelLoader:
     """
     Select the four GGUF model files required by acestep.cpp.
@@ -741,6 +843,35 @@ class AcestepCPPGenerate:
                         "tooltip": "LoRA adapter scale",
                     },
                 ),
+                "reference_audio_input": (
+                    "AUDIO",
+                    {
+                        "tooltip": (
+                            "Reference audio for timbre transfer, connected from a "
+                            "Load Audio node. Overrides the 'reference_audio' path "
+                            "string when connected."
+                        ),
+                    },
+                ),
+                "src_audio_input": (
+                    "AUDIO",
+                    {
+                        "tooltip": (
+                            "Source audio for cover/repaint mode, connected from a "
+                            "Load Audio node. Overrides the 'src_audio' path string "
+                            "when connected."
+                        ),
+                    },
+                ),
+                "lora": (
+                    "ACESTEP_LORA",
+                    {
+                        "tooltip": (
+                            "LoRA adapter from the Acestep.cpp LoRA Loader node. "
+                            "Overrides 'lora_path' / 'lora_scale' when connected."
+                        ),
+                    },
+                ),
             },
         }
 
@@ -774,6 +905,9 @@ class AcestepCPPGenerate:
         audio_cover_strength: float = 1.0,
         lora_path: str = "",
         lora_scale: float = 1.0,
+        reference_audio_input: Optional[Dict[str, Any]] = None,
+        src_audio_input: Optional[Dict[str, Any]] = None,
+        lora: Optional[Dict[str, Any]] = None,
     ):
         import torchaudio
 
@@ -793,7 +927,33 @@ class AcestepCPPGenerate:
                 "or add the binary to your PATH."
             )
 
+        # If a LoRA was supplied via the LoRA Loader node, it takes priority
+        # over the freeform lora_path / lora_scale widget values.
+        if lora is not None:
+            lora_path = lora["path"]
+            lora_scale = lora["scale"]
+
         with tempfile.TemporaryDirectory() as tmpdir:
+            # Materialise AUDIO tensor inputs as WAV files so the binary can
+            # read them.  These override the freeform string-path widgets.
+            if reference_audio_input is not None:
+                ref_wav = os.path.join(tmpdir, "reference_audio.wav")
+                torchaudio.save(
+                    ref_wav,
+                    reference_audio_input["waveform"].squeeze(0),
+                    reference_audio_input["sample_rate"],
+                )
+                reference_audio = ref_wav
+
+            if src_audio_input is not None:
+                src_wav = os.path.join(tmpdir, "src_audio.wav")
+                torchaudio.save(
+                    src_wav,
+                    src_audio_input["waveform"].squeeze(0),
+                    src_audio_input["sample_rate"],
+                )
+                src_audio = src_wav
+
             request_path = os.path.join(tmpdir, "request.json")
 
             request: Dict[str, Any] = {

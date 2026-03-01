@@ -5,5 +5,8 @@
   "binary_paths": {
     "ace-qwen3": "/path/to/acestep.cpp/build/ace-qwen3",
     "dit-vae": "/path/to/acestep.cpp/build/dit-vae"
-  }
+  },
+  "lora_folders": [
+    "/path/to/your/loras"
+  ]
 }
