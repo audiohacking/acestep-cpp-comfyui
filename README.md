@@ -42,7 +42,10 @@ The binaries land in `<node_dir>/acestep.cpp/build/`, which is where the **Gener
 
 **Option B – Command line**
 
+Clone `acestep.cpp` **inside the node directory** so the Generate node finds the binaries automatically — no configuration required:
+
 ```bash
+cd ComfyUI/custom_nodes/acestep-cpp-comfyui
 git clone https://github.com/audiohacking/acestep.cpp
 cd acestep.cpp
 git submodule update --init
@@ -58,7 +61,7 @@ cmake .. -DGGML_BLAS=ON
 cmake --build . --config Release -j$(nproc)
 ```
 
-This produces two binaries: `ace-qwen3` (LM) and `dit-vae` (DiT + VAE).
+This produces `ace-qwen3` and `dit-vae` in `<node_dir>/acestep.cpp/build/`, which is where the Generate node already looks — no extra config needed.
 
 ### 2 – Download GGUF models
 
@@ -95,29 +98,29 @@ cd ComfyUI/custom_nodes
 git clone https://github.com/audiohacking/acestep-cpp-comfyui
 ```
 
-Restart ComfyUI.
+Restart ComfyUI. On startup the node will attempt to build the `ace-qwen3` and `dit-vae` binaries automatically if `git` and `cmake` are available. If the automatic build does not complete, use the **Acestep.cpp Builder** node inside ComfyUI — no manual file editing required.
 
-## Configuration
+## Advanced Configuration
 
-Copy `config.example.json` to `config.json` in the node directory and edit it:
+`config.json` is **optional** and only needed if you store binaries or models in non-standard locations.
+
+Copy `config.example.json` to `config.json` in the node directory and set only the keys you need:
 
 ```json
 {
   "model_folders": [
-    "/path/to/acestep.cpp/models"
+    "/custom/path/to/models"
   ],
   "binary_paths": {
-    "ace-qwen3": "/path/to/acestep.cpp/build/ace-qwen3",
-    "dit-vae": "/path/to/acestep.cpp/build/dit-vae"
+    "ace-qwen3": "/custom/path/to/build/ace-qwen3",
+    "dit-vae": "/custom/path/to/build/dit-vae"
   }
 }
 ```
 
-**`model_folders`** – list of directories to scan for `.gguf` files. These are merged with ComfyUI's built-in `text_encoders` folder. Non-existent paths are silently ignored.
+**`model_folders`** – additional directories to scan for `.gguf` files, merged with ComfyUI's built-in `text_encoders` folder.
 
-**`binary_paths`** – explicit paths to the `ace-qwen3` and `dit-vae` binaries. If omitted, the node also searches your system `PATH` and `<node_dir>/acestep.cpp/build/`.
-
-`config.json` is optional; if both binaries are on `PATH` and the GGUF files are in a standard ComfyUI model folder, no configuration file is needed.
+**`binary_paths`** – override the automatic binary search. The node already looks in your system `PATH` and `<node_dir>/acestep.cpp/build/`, so this is only needed for custom build locations.
 
 ## Example Workflows
 
