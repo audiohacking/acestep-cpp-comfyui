@@ -45,11 +45,11 @@ jobs:
   # -------------------------------------------------------------------------
   # Build test: clone acestep.cpp and compile the C++ binaries via install.py
   # Tests the automatic build that ComfyUI Manager triggers on node install.
+  # Runs on every push to main, every PR, and on manual workflow_dispatch.
   # -------------------------------------------------------------------------
   build-test:
     name: Build acestep.cpp binaries (install.py)
     runs-on: ubuntu-latest
-    if: github.event_name == 'workflow_dispatch'
     permissions:
       contents: read
     steps:
@@ -66,8 +66,15 @@ jobs:
       - name: Verify binaries exist
         run: |
           for bin in ace-qwen3 dit-vae; do
-            test -f "acestep.cpp/build/$bin" \
-              && echo "✓ $bin" \
-              || (echo "✗ $bin not found" && exit 1)
+            # install.py passes -DCMAKE_RUNTIME_OUTPUT_DIRECTORY so binaries
+            # land in build/ directly; also check build/bin/ as a fallback for
+            # any build done without that flag (mirrors _binary_in_build logic).
+            if test -f "acestep.cpp/build/$bin"; then
+              echo "✓ $bin (build/)"
+            elif test -f "acestep.cpp/build/bin/$bin"; then
+              echo "✓ $bin (build/bin/)"
+            else
+              echo "✗ $bin not found in build/ or build/bin/" && exit 1
+            fi
           done
 
