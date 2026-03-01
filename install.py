@@ -51,7 +51,12 @@ def _detect_backend() -> str:
 def _cmake_flags(backend: str):
     return {
         "cuda":  ["-DGGML_CUDA=ON"],
-        "metal": [],
+        # GGML_METAL_EMBED_LIBRARY=ON pre-compiles Metal shaders at build time
+        # and embeds the resulting binary .metallib in the executable.  This
+        # avoids the Metal JIT compilation that happens at runtime when only
+        # source is embedded, which can fail on certain macOS/Xcode SDK
+        # combinations with template type-mismatch errors in the Metal shader.
+        "metal": ["-DGGML_METAL_EMBED_LIBRARY=ON"],
         "blas":  ["-DGGML_BLAS=ON"],
         "cpu":   [],
     }.get(backend, [])
