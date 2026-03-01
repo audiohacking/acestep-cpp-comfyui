@@ -8,11 +8,13 @@ on:
 
 jobs:
   # -------------------------------------------------------------------------
-  # Fast validation: Python syntax + JSON well-formedness (no models needed)
+  # Fast validation: Python syntax + linting + pytest + JSON well-formedness
   # -------------------------------------------------------------------------
   validate:
     name: Validate code and workflow JSONs
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v4
 
@@ -20,13 +22,17 @@ jobs:
         with:
           python-version: "3.11"
 
+      - name: Install test dependencies
+        run: pip install pytest pyflakes
+
       - name: Check Python syntax
-        run: python -m py_compile nodes.py __init__.py
+        run: python -m py_compile nodes.py __init__.py install.py
 
       - name: Lint Python
-        run: |
-          pip install pyflakes
-          python -m pyflakes nodes.py __init__.py
+        run: python -m pyflakes nodes.py __init__.py install.py
+
+      - name: Run unit tests
+        run: python -m pytest tests/ -v
 
       - name: Validate workflow JSON files
         run: |
@@ -37,6 +43,35 @@ jobs:
           done
 
   # -------------------------------------------------------------------------
+  # Build test: clone acestep.cpp and compile the C++ binaries via install.py
+  # Tests the automatic build that ComfyUI Manager triggers on node install.
+  # -------------------------------------------------------------------------
+  build-test:
+    name: Build acestep.cpp binaries (install.py)
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch'
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build tools
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y cmake build-essential
+
+      - name: Run install.py (clone + cmake build)
+        run: python install.py
+
+      - name: Verify binaries exist
+        run: |
+          for bin in ace-qwen3 dit-vae; do
+            test -f "acestep.cpp/build/$bin" \
+              && echo "✓ $bin" \
+              || (echo "✗ $bin not found" && exit 1)
+          done
+
+  # -------------------------------------------------------------------------
   # Full workflow test via Comfy-Org/comfy-action
   # Runs on workflow_dispatch only because it must download large GGUF models.
   # -------------------------------------------------------------------------
@@ -44,6 +79,8 @@ jobs:
     name: Run workflow with Comfy Action
     runs-on: ubuntu-latest
     if: github.event_name == 'workflow_dispatch'
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v4
 
@@ -84,3 +121,4 @@ jobs:
                 "directory": "text_encoders"
               }
             }
+

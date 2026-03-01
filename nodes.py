@@ -74,8 +74,15 @@ def find_model_path(model_name: str) -> Optional[str]:
     return None
 
 
+def _coerce_float(value: Any, default: float) -> float:
+    """Return *value* as a float, falling back to *default* for empty strings.
 
-
+    Older ComfyUI workflows may store optional FLOAT widget values as ``""``
+    instead of the numeric default when the field was not explicitly set.
+    """
+    if isinstance(value, str):
+        return float(value) if value.strip() else default
+    return float(value)
 def get_binary_path(binary_name: str) -> Optional[str]:
     """
     Locate an acestep.cpp binary.
@@ -887,10 +894,8 @@ class AcestepCPPGenerate:
 
         # Coerce optional FLOAT inputs that may arrive as empty strings from
         # workflows saved with an older version of the node schema.
-        if isinstance(lm_top_p, str):
-            lm_top_p = float(lm_top_p) if lm_top_p.strip() else 0.9
-        if isinstance(audio_cover_strength, str):
-            audio_cover_strength = float(audio_cover_strength) if audio_cover_strength.strip() else 1.0
+        lm_top_p = _coerce_float(lm_top_p, 0.9)
+        audio_cover_strength = _coerce_float(audio_cover_strength, 1.0)
 
         ace_qwen3 = get_binary_path("ace-qwen3")
         dit_vae = get_binary_path("dit-vae")
