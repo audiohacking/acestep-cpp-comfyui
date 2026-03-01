@@ -46,7 +46,7 @@
       ],
       "properties": {"Node name for S&R": "AcestepCPPLoraLoader"},
       "widgets_values": [
-        "No LoRA models found",
+        "",
         1.0
       ]
     },

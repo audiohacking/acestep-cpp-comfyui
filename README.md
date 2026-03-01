@@ -109,18 +109,13 @@ Copy `config.example.json` to `config.json` in the node directory and edit it:
   "binary_paths": {
     "ace-qwen3": "/path/to/acestep.cpp/build/ace-qwen3",
     "dit-vae": "/path/to/acestep.cpp/build/dit-vae"
-  },
-  "lora_folders": [
-    "/path/to/my/loras"
-  ]
+  }
 }
 ```
 
 **`model_folders`** – list of directories to scan for `.gguf` files. These are merged with ComfyUI's built-in `text_encoders` folder. Non-existent paths are silently ignored.
 
 **`binary_paths`** – explicit paths to the `ace-qwen3` and `dit-vae` binaries. If omitted, the node also searches your system `PATH` and `<node_dir>/acestep.cpp/build/`.
-
-**`lora_folders`** – additional directories to scan for LoRA `.gguf` files. The LoRA Loader also scans `loras/` subdirectories inside every model folder and ComfyUI's standard `loras` folder automatically.
 
 `config.json` is optional; if both binaries are on `PATH` and the GGUF files are in a standard ComfyUI model folder, no configuration file is needed.
 
@@ -219,18 +214,14 @@ Selects the four GGUF model files and validates that they exist on disk.
 
 ### Acestep.cpp LoRA Loader
 
-Selects a LoRA adapter GGUF file and scale, ready to connect to the **Generate** node.
-
-Scans (in order):
-1. A `loras/` subdirectory inside each model folder.
-2. ComfyUI's standard `loras` folder.
-3. User-configured `lora_folders` from `config.json`.
+Specify a LoRA adapter file and scale, ready to connect to the **Generate** node.
+Enter the full path to any `.gguf` or `.safetensors` LoRA file anywhere on your filesystem.
 
 **Inputs (required)**
 
 | Name | Description |
 |------|-------------|
-| `lora_model` | LoRA GGUF file selected from the scanned directories |
+| `lora_path` | Full filesystem path to the LoRA adapter file (`.gguf` or `.safetensors`) |
 | `lora_scale` | Adapter scale (default `1.0`) |
 
 **Outputs**
@@ -238,8 +229,6 @@ Scans (in order):
 | Name | Type | Description |
 |------|------|-------------|
 | `lora` | `ACESTEP_LORA` | LoRA bundle passed to the generator |
-
-> **Tip**: Place LoRA GGUFs in a `loras/` subdirectory of your existing model folder (e.g. `models/text_encoders/loras/`) and they will appear automatically in the dropdown.
 
 ---
 

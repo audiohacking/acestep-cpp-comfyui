@@ -61,56 +61,6 @@ def find_model_path(model_name: str) -> Optional[str]:
     return None
 
 
-def get_lora_folders() -> List[str]:
-    """Return directories to scan for LoRA GGUF files.
-
-    Checks (in order):
-      1. A ``loras/`` subdirectory inside each model folder.
-      2. ComfyUI's standard ``loras`` folder.
-      3. User-configured ``lora_folders`` from config.json.
-    """
-    dirs: List[str] = []
-    for folder in get_merged_model_folders():
-        lora_sub = os.path.join(folder, "loras")
-        if os.path.isdir(lora_sub):
-            dirs.append(lora_sub)
-    try:
-        dirs += folder_paths.get_folder_paths("loras")
-    except Exception:
-        pass
-    dirs += load_config().get("lora_folders", [])
-    # deduplicate while preserving order
-    seen_dirs: set = set()
-    result: List[str] = []
-    for d in dirs:
-        if d not in seen_dirs and os.path.isdir(d):
-            result.append(d)
-            seen_dirs.add(d)
-    return result
-
-
-def scan_lora_models() -> List[str]:
-    """Scan lora folders for .gguf files, deduplicated and sorted."""
-    seen_models: set = set()
-    models: List[str] = []
-    for folder in get_lora_folders():
-        try:
-            for name in os.listdir(folder):
-                if name.lower().endswith(".gguf") and name not in seen_models:
-                    models.append(name)
-                    seen_models.add(name)
-        except OSError:
-            pass
-    return sorted(models)
-
-
-def find_lora_path(model_name: str) -> Optional[str]:
-    """Return the full path to a LoRA GGUF file, or None if not found."""
-    for folder in get_lora_folders():
-        path = os.path.join(folder, model_name)
-        if os.path.isfile(path):
-            return path
-    return None
 
 
 def get_binary_path(binary_name: str) -> Optional[str]:
@@ -506,24 +456,28 @@ class AcestepCPPBuilder:
 
 class AcestepCPPLoraLoader:
     """
-    Select a LoRA adapter GGUF file for use with acestep.cpp.
+    Specify a LoRA adapter file for use with acestep.cpp.
 
-    Scans the ``loras/`` subdirectories of each model folder (and any
-    ComfyUI ``loras`` folder or user-configured ``lora_folders`` from
-    config.json) for ``.gguf`` files.
-
-    Outputs an ``ACESTEP_LORA`` dict consumed by the generator node.
+    Enter the full path to any ``.gguf`` or ``.safetensors`` LoRA file on
+    your filesystem. Outputs an ``ACESTEP_LORA`` dict consumed by the
+    generator node.
     """
+
+    _ALLOWED_EXTENSIONS = (".gguf", ".safetensors")
 
     @classmethod
     def INPUT_TYPES(cls):
-        lora_list = scan_lora_models()
-        options = lora_list if lora_list else ["No LoRA models found"]
         return {
             "required": {
-                "lora_model": (
-                    options,
-                    {"tooltip": "LoRA adapter GGUF file"},
+                "lora_path": (
+                    "STRING",
+                    {
+                        "default": "",
+                        "tooltip": (
+                            "Full path to a LoRA adapter file (.gguf or .safetensors). "
+                            "You can use any file location on your filesystem."
+                        ),
+                    },
                 ),
                 "lora_scale": (
                     "FLOAT",
@@ -543,13 +497,20 @@ class AcestepCPPLoraLoader:
     FUNCTION = "load_lora"
     CATEGORY = "AcestepCPP"
 
-    def load_lora(self, lora_model: str, lora_scale: float):
-        path = find_lora_path(lora_model)
-        if path is None:
+    def load_lora(self, lora_path: str, lora_scale: float):
+        path = lora_path.strip()
+        if not path:
+            raise ValueError(
+                "lora_path is empty. Enter the full path to your LoRA file."
+            )
+        if not any(path.lower().endswith(ext) for ext in self._ALLOWED_EXTENSIONS):
+            raise ValueError(
+                f"Unsupported LoRA file type: {path!r}. "
+                f"Expected one of: {', '.join(self._ALLOWED_EXTENSIONS)}"
+            )
+        if not os.path.isfile(path):
             raise FileNotFoundError(
-                f"Could not locate LoRA file: {lora_model}. "
-                "Place LoRA GGUFs in a 'loras/' subdirectory of your model "
-                "folder, or configure 'lora_folders' in config.json."
+                f"LoRA file not found: {path}"
             )
         return ({"path": path, "scale": lora_scale},)
 
