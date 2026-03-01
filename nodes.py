@@ -1,5 +1,7 @@
 import os
 import json
+import platform
+import multiprocessing
 import shutil
 import subprocess
 import tempfile
@@ -235,6 +237,219 @@ class AcestepCPPModelDownloader:
         summary = "\n".join(summary_parts) if summary_parts else "Nothing to do."
         return (summary,)
 
+
+# The upstream source repository for the binaries
+_ACESTEP_CPP_REPO = "https://github.com/audiohacking/acestep.cpp"
+
+
+class AcestepCPPBuilder:
+    """
+    Clone ``acestep.cpp`` from GitHub and build the ``ace-qwen3`` and
+    ``dit-vae`` binaries via CMake.
+
+    The default clone directory (``<node_dir>/acestep.cpp``) is the same path
+    that ``get_binary_path()`` already searches, so the built binaries will be
+    found automatically by the Generate node without any extra configuration.
+    """
+
+    BACKENDS = ["auto", "cuda", "metal", "blas", "cpu"]
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        default_dir = os.path.join(os.path.dirname(__file__), "acestep.cpp")
+        return {
+            "required": {
+                "clone_dir": (
+                    "STRING",
+                    {
+                        "default": default_dir,
+                        "tooltip": (
+                            "Directory to clone acestep.cpp into. "
+                            "Defaults to <node_dir>/acestep.cpp so that the "
+                            "Generate node finds the binaries automatically."
+                        ),
+                    },
+                ),
+                "backend": (
+                    cls.BACKENDS,
+                    {
+                        "default": "auto",
+                        "tooltip": (
+                            "GPU/compute backend for CMake. "
+                            "'auto' detects CUDA, Metal, or falls back to CPU."
+                        ),
+                    },
+                ),
+            },
+            "optional": {
+                "force_rebuild": (
+                    "BOOLEAN",
+                    {
+                        "default": False,
+                        "tooltip": (
+                            "Delete the existing build directory and rebuild from scratch."
+                        ),
+                        "label_on": "Force rebuild",
+                        "label_off": "Incremental",
+                    },
+                ),
+            },
+        }
+
+    RETURN_TYPES = ("STRING",)
+    RETURN_NAMES = ("build_log",)
+    FUNCTION = "build"
+    CATEGORY = "AcestepCPP"
+    OUTPUT_NODE = True
+
+    # Maximum number of recent log lines included in error messages
+    _MAX_ERROR_LOG_LINES = 40
+
+    # Binaries produced by the cmake build
+    _BINARIES = ("ace-qwen3", "dit-vae")
+
+    # ------------------------------------------------------------------
+    # Helpers
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _detect_backend() -> str:
+        """Return the best available cmake backend flag value."""
+        # CUDA: look for nvcc or nvidia-smi on PATH
+        if shutil.which("nvcc") or shutil.which("nvidia-smi"):
+            return "cuda"
+        # Apple Metal: macOS always supports Metal through ggml
+        if platform.system() == "Darwin":
+            return "metal"
+        # OpenBLAS: check pkg-config first (cross-distro), then common header
+        # locations, then dpkg as a last resort on Debian-based systems
+        if shutil.which("pkg-config") and subprocess.run(
+            ["pkg-config", "--exists", "openblas"],
+            capture_output=True,
+        ).returncode == 0:
+            return "blas"
+        openblas_headers = [
+            "/usr/include/openblas/cblas.h",
+            "/usr/local/include/openblas/cblas.h",
+            "/opt/homebrew/include/openblas/cblas.h",
+        ]
+        if any(os.path.isfile(h) for h in openblas_headers):
+            return "blas"
+        if shutil.which("dpkg") and subprocess.run(
+            ["dpkg", "-l", "libopenblas-dev"],
+            capture_output=True,
+        ).returncode == 0:
+            return "blas"
+        return "cpu"
+
+    @staticmethod
+    def _cmake_flags(backend: str) -> List[str]:
+        """Translate backend name to CMake -D flags."""
+        mapping = {
+            "cuda":  ["-DGGML_CUDA=ON"],
+            "metal": [],  # Metal is auto-enabled on macOS by ggml
+            "blas":  ["-DGGML_BLAS=ON"],
+            "cpu":   [],
+        }
+        return mapping.get(backend, [])
+
+    @staticmethod
+    def _run(cmd: List[str], cwd: str, log_lines: List[str]) -> None:
+        """Run a command, stream output to log_lines, raise on failure."""
+        label = " ".join(cmd)
+        log_lines.append(f"$ {label}")
+        result = subprocess.run(
+            cmd, cwd=cwd, capture_output=True, text=True
+        )
+        if result.stdout:
+            log_lines.extend(result.stdout.splitlines())
+        if result.stderr:
+            log_lines.extend(result.stderr.splitlines())
+        if result.returncode != 0:
+            raise RuntimeError(
+                f"Command failed (exit {result.returncode}): {label}\n"
+                + "\n".join(log_lines[-self._MAX_ERROR_LOG_LINES:])
+            )
+
+    # ------------------------------------------------------------------
+    # Main entry point
+    # ------------------------------------------------------------------
+
+    def build(
+        self,
+        clone_dir: str,
+        backend: str = "auto",
+        force_rebuild: bool = False,
+    ):
+        log: List[str] = []
+
+        # --- Resolve backend --------------------------------------------------
+        resolved = self._detect_backend() if backend == "auto" else backend
+        log.append(f"[AcestepCPP] Backend: {resolved} (requested: {backend})")
+
+        # --- Clone or update --------------------------------------------------
+        repo_dir = clone_dir
+        if not os.path.isdir(repo_dir):
+            log.append(f"[AcestepCPP] Cloning {_ACESTEP_CPP_REPO} -> {repo_dir}")
+            if not shutil.which("git"):
+                raise RuntimeError(
+                    "git is not available on PATH. Please install git and retry."
+                )
+            self._run(
+                ["git", "clone", "--recurse-submodules", _ACESTEP_CPP_REPO, repo_dir],
+                cwd=os.path.dirname(repo_dir),
+                log_lines=log,
+            )
+        else:
+            log.append(f"[AcestepCPP] Repo exists: {repo_dir} — updating submodules")
+            self._run(
+                ["git", "submodule", "update", "--init", "--recursive"],
+                cwd=repo_dir,
+                log_lines=log,
+            )
+
+        # --- Prepare build directory ------------------------------------------
+        build_dir = os.path.join(repo_dir, "build")
+        if force_rebuild and os.path.isdir(build_dir):
+            log.append(f"[AcestepCPP] Removing existing build dir: {build_dir}")
+            shutil.rmtree(build_dir)
+
+        os.makedirs(build_dir, exist_ok=True)
+
+        # --- CMake configure --------------------------------------------------
+        cmake_cmd = ["cmake", ".."] + self._cmake_flags(resolved)
+        log.append(f"[AcestepCPP] Configuring: {' '.join(cmake_cmd)}")
+        if not shutil.which("cmake"):
+            raise RuntimeError(
+                "cmake is not available on PATH. "
+                "Install cmake (e.g. apt install cmake) and retry."
+            )
+        self._run(cmake_cmd, cwd=build_dir, log_lines=log)
+
+        # --- CMake build ------------------------------------------------------
+        jobs = str(multiprocessing.cpu_count())
+        build_cmd = ["cmake", "--build", ".", "--config", "Release", f"-j{jobs}"]
+        log.append(f"[AcestepCPP] Building with {jobs} parallel jobs ...")
+        self._run(build_cmd, cwd=build_dir, log_lines=log)
+
+        # --- Verify outputs ---------------------------------------------------
+        missing = []
+        for binary in self._BINARIES:
+            path = os.path.join(build_dir, binary)
+            if not os.path.isfile(path):
+                missing.append(binary)
+
+        if missing:
+            raise RuntimeError(
+                f"Build succeeded but expected binaries not found: {', '.join(missing)}. "
+                f"Check the build log above."
+            )
+
+        log.append(
+            f"[AcestepCPP] Build complete. Binaries in {build_dir}: "
+            + ", ".join(self._BINARIES)
+        )
+        return ("\n".join(log),)
 
 
 class AcestepCPPModelLoader:

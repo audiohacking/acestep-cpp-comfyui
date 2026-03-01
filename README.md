@@ -4,6 +4,7 @@ ComfyUI custom nodes that wrap [acestep.cpp](https://github.com/audiohacking/ace
 
 ## Features
 
+- **Build** the `ace-qwen3` and `dit-vae` binaries from source via the **Acestep.cpp Builder** node (no terminal required)
 - **Download** the required GGUF models directly from HuggingFace without leaving ComfyUI
 - Load the four GGUF model files required by acestep.cpp (LM, text encoder, DiT, VAE)
 - Generate music from a caption and optional lyrics/metadata
@@ -13,7 +14,30 @@ ComfyUI custom nodes that wrap [acestep.cpp](https://github.com/audiohacking/ace
 
 ## Prerequisites
 
+`git` and `cmake` must be on your system `PATH` before using the Builder node (or the manual build below). Everything else is handled inside ComfyUI.
+
+```bash
+# Debian/Ubuntu
+apt install git cmake build-essential
+
+# macOS (Homebrew)
+brew install cmake
+```
+
 ### 1 – Build acestep.cpp
+
+**Option A – Acestep.cpp Builder node (recommended)**
+
+After installing this custom node package, drop the **Acestep.cpp Builder** node onto your canvas and click *Queue*. It will:
+
+1. Clone `https://github.com/audiohacking/acestep.cpp` into `<node_dir>/acestep.cpp`
+2. Run `git submodule update --init --recursive`
+3. Configure with CMake (auto-detecting CUDA → Metal → CPU)
+4. Build `ace-qwen3` and `dit-vae` using all available CPU cores
+
+The binaries land in `<node_dir>/acestep.cpp/build/`, which is where the **Generate** node looks first — no extra config needed.
+
+**Option B – Command line**
 
 ```bash
 git clone https://github.com/audiohacking/acestep.cpp
@@ -93,6 +117,33 @@ Copy `config.example.json` to `config.json` in the node directory and edit it:
 `config.json` is optional; if both binaries are on `PATH` and the GGUF files are in a standard ComfyUI model folder, no configuration file is needed.
 
 ## Node Reference
+
+### Acestep.cpp Builder
+
+Clones [`audiohacking/acestep.cpp`](https://github.com/audiohacking/acestep.cpp) from GitHub and builds the `ace-qwen3` and `dit-vae` binaries using CMake. Requires `git` and `cmake` on the system PATH.
+
+**Inputs (required)**
+
+| Name | Default | Description |
+|------|---------|-------------|
+| `clone_dir` | `<node_dir>/acestep.cpp` | Directory to clone the repo into |
+| `backend` | `auto` | CMake backend: `auto` (detects CUDA → Metal → CPU), `cuda`, `metal`, `blas`, `cpu` |
+
+**Inputs (optional)**
+
+| Name | Default | Description |
+|------|---------|-------------|
+| `force_rebuild` | `false` | Remove the existing `build/` directory and rebuild from scratch |
+
+**Outputs**
+
+| Name | Type | Description |
+|------|------|-------------|
+| `build_log` | `STRING` | Full cmake configure + build output |
+
+> **Tip**: Run this node once to compile the binaries. The default `clone_dir` places them where the **Generate** node already searches, so no further configuration is needed.
+
+---
 
 ### Acestep.cpp Model Downloader
 
