@@ -89,7 +89,7 @@ def get_binary_path(binary_name: str) -> Optional[str]:
     Search order:
       1. Explicit path from config.json ``binary_paths`` mapping.
       2. System PATH (via shutil.which).
-      3. ``<node_dir>/acestep.cpp/build/`` (local build alongside the node).
+      3. ``<node_dir>/acestep.cpp/build/<binary_name>`` (local build alongside the node).
     """
     config = load_config()
     explicit = config.get("binary_paths", {}).get(binary_name)
@@ -100,9 +100,8 @@ def get_binary_path(binary_name: str) -> Optional[str]:
     if on_path:
         return on_path
 
-    local_dir = os.path.join(os.path.dirname(__file__), "acestep.cpp", "build")
-    local = shutil.which(binary_name, path=local_dir)
-    if local:
+    local = os.path.join(os.path.dirname(__file__), "acestep.cpp", "build", binary_name)
+    if os.path.isfile(local):
         return local
 
     return None
@@ -455,11 +454,11 @@ class AcestepCPPBuilder:
         self._run(build_cmd, cwd=build_dir, log_lines=log)
 
         # --- Verify outputs ---------------------------------------------------
-        # shutil.which also confirms the binary is executable, not just present.
-        missing = [
-            b for b in self._BINARIES
-            if not shutil.which(b, path=build_dir)
-        ]
+        missing = []
+        for binary in self._BINARIES:
+            path = os.path.join(build_dir, binary)
+            if not os.path.isfile(path):
+                missing.append(binary)
 
         if missing:
             raise RuntimeError(
